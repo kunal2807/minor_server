@@ -1,0 +1,21 @@
+<html>
+  <body>
+    HELL YEAH
+    
+    <img id="image">
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/3.0.3/socket.io.js" integrity="sha512-Jr0UIR/Q8MUX+93zjDOhuDUKLqJZObtwpkLJQcR9qMaLgL0thet39IORuavUaZFkZ8a4ktrUsKPM9mf5LWMduA==" crossorigin="anonymous"></script>
+    
+    <script>
+
+      const socket=io.connect('http://localhost:3000');
+      socket.on('image', (frame)=>{
+        console.log("DATA: ",frame);
+        const imageElem= document.getElementById('image');
+        imageElem.src = frame;
+      });
+
+    </script>
+
+  </body>
+</html>
