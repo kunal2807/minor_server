@@ -15,10 +15,11 @@ import datetime
 import imutils
 import time
 import cv2
+from flask_cors import CORS
 
 from scipy.spatial import distance as dist
 
-
+# model to predict mask n distance threads
 def detect_and_predict_mask(frame, faceNet, maskNet):
 	# grab the dimensions of the frame and then construct a blob
 	# from it
@@ -81,8 +82,8 @@ def detect_and_predict_mask(frame, faceNet, maskNet):
 	# return a 2-tuple of the face locations and their corresponding
 	# locations
 	return (locs, preds)
-
-
+# ---------------------------------------------------------------------------------
+# Load all static files
 # load our serialized face detector model from disk
 prototxtPath = r"./deploy.prototxt"
 weightsPath = r"./res10_300x300_ssd_iter_140000.caffemodel"
@@ -95,32 +96,40 @@ face_model = cv2.CascadeClassifier(r'haarcascade_frontalface_default.xml')
 # load the face mask detector model from disk
 maskNet = load_model("mask_detector.model")
 
-outputFrame = None
-lock = threading.Lock()
+# Init all gloabl variable
+outputFrame = None         # A output frame, shared resource b/w 2 process 
+lock = threading.Lock()    # Semaphore lock for outputframe
 
-app = Flask(__name__)
+app = Flask(__name__)     # make flask app 
+cors = CORS(app)
 
-source =None
-vs = VideoStream(src=0).start()
+source =None   										# camera or video
+vs = None      										# vediostream pointer to webcam or mp4
+t=None         										# A thread pointer
+stop_thread_t=False								# To kill the thread
 
+#----------------------------------------------------------------------------
+
+# STATIC TEMPLATE (for testing purposes)
 @app.route("/")
 def index():
 	# return the rendered template
 	print("##\n")
 	return render_template("index.html")
 
-
+# A seperate thread, t to make output frames
 def detect_mask():
   # grab global references to the video stream, output frame, and
   # lock variables
-	global vs, outputFrame, lock
-  
-
+	global vs, outputFrame, lock, stop_thread_t
 	while True:
+		if stop_thread_t:
+			print("ending T")
+			break
     # grab the frame from the threaded video stream and resize it
     # to have a maximum width of 400 pixels
 		frame = vs.read()
-		frame = imutils.resize(frame, width=1280)
+		frame = imutils.resize(frame, width=1069, height=500)
 
     # detect faces in the frame and determine if they are wearing a
     # face mask or not
@@ -183,18 +192,13 @@ def detect_mask():
 				frame = cv2.putText(frame, "!!MOVE AWAY!!", (100, 100), cv2.FONT_HERSHEY_SIMPLEX,2, [0,0,255] , 4)
 				frame = cv2.putText(frame, str(D/10) + " cm", (300, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0) , 2, cv2.LINE_AA)
 
-    # show the output frame
+    # show the output frame (for testing purpose)
     # cv2.imshow("Frame", frame)
-		key = cv2.waitKey(1) & 0xFF
-
+		# send output frame
 		with lock:
 			outputFrame = frame.copy()
 
-		# if the `q` key was pressed, break from the loop
-		if key == ord("q"):
-			break
-
-
+# generate a byte encoded frame for every outputframe
 def generate():
 	# grab global references to the output frame and lock variables
 	global outputFrame, lock
@@ -215,33 +219,61 @@ def generate():
 		yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
 			bytearray(encodedImage) + b'\r\n')
 
+# route to uplaod a mp4 file
+@app.route('/upload', methods=['POST'])
+def upload_file():
+	global source, vs, t, stop_thread_t
+	uploaded_file = request.files['video']
+	uploaded_file.save('./input.mp4')
+	# uploaded_file.save
+	print("===#####====request: ", request)
+	print("===#####====request: ", request.files)
+	# upload_file.save('./input.mp4')
+	# source='./input.mp4'
+	# vs = VideoStream(src=source).start()
+	# stop_thread_t=False
+	# t = threading.Thread(target=detect_mask, args=())
+	# t.daemon = True
+	# t.start()
+	# print("####FEED####", source)
+	# return Response(generate(), mimetype = "multipart/x-mixed-replace; boundary=frame")
+	return Response(status='200')
 
+# end point to kill thread n stop the cam
+@app.route("/feed_stop")
+def feed_stop():
+	global t, vs, stop_thread_t
+	vs.stop()
+	vs=None
+	stop_thread_t=True
+	print("====t alived? = ", t.is_alive())
+	# t._stop()
+	return (Response(status = "200"))
+
+# end point to send video feed
 @app.route("/video_feed")
 def video_feed():
 	# return the response generated along with the specific media
 	# type (mime type)
-	global source, vs
-	# source=request.args.get('source')
-	# if source=='0':
-	# 	source=0
-	# vs = VideoStream(src=source).start()
-	print("####FEED####", source)
-	return Response(generate(),
-		mimetype = "multipart/x-mixed-replace; boundary=frame")
-
-
-# check to see if this is the main thread of execution
-if __name__ == '__main__':
-	# start a thread that will perform motion detection
+	global source, vs, t, stop_thread_t
+	source=request.args.get('source')
+	if source=='0':
+		source=0
+	else:
+		source='./input.mp4'
+	vs = VideoStream(src=source).start()
+	stop_thread_t=False
 	t = threading.Thread(target=detect_mask, args=())
 	t.daemon = True
 	t.start()
-	# start the flask app
+	print("####FEED####", source)
+	return Response(generate(), mimetype = "multipart/x-mixed-replace; boundary=frame")
 
+
+# Start the server
+if __name__ == '__main__':	
+	# start the flask app
 	app.run(host='localhost', port='8000', debug=True, threaded=True, use_reloader=False)
 
-
-# release the video stream pointer
-vs.stop()
 
 
